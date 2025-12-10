@@ -1,0 +1,95 @@
+name: Build macOS x86_64
+
+on:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  MAC_RUST_VERSION: "stable"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  UPLOAD_ARTIFACT: "true"
+  VERSION: "1.0.1"
+  TAG_NAME: "1.0.1"
+
+jobs:
+  build-x86_64-macos:
+    name: Build x86_64 macOS
+    runs-on: macos-15-intel
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build runtime
+        run: |
+          brew install llvm create-dmg nasm pkg-config
+          # Fix for AOM multipass NASM issue
+          export NASM_VER=$(nasm -v | head -n1)
+          echo "Using NASM version: $NASM_VER"
+          # Disable multipass optimization for AOM in vcpkg
+          find vcpkg/buildtrees/aom/src -name "CMakeLists.txt" -exec sed -i '' 's/ENABLE_MULTIPASS=ON/ENABLE_MULTIPASS=OFF/' {} \; || true
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Patch Flutter
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          [[ "3.24.5" == ${{ env.FLUTTER_VERSION }} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Workaround for Flutter issue
+        shell: bash
+        run: |
+          cd "$(dirname "$(which flutter)")"
+          sed -i '' -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g' ../packages/flutter/lib/src/scheduler/binding.dart
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.MAC_RUST_VERSION }}
+          targets: x86_64-apple-darwin
+          components: rustfmt
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        run: |
+          $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Fix macOS deployment target
+        run: |
+          export MACOSX_DEPLOYMENT_TARGET=12.0
+          sed -i '' -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*/MACOSX_DEPLOYMENT_TARGET = ${MACOSX_DEPLOYMENT_TARGET}/" flutter/macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' -e "s/osx_minimum_system_version = \"[0-9]*\.[0-9]*\"/osx_minimum_system_version = \"${MACOSX_DEPLOYMENT_TARGET}\"/" Cargo.toml
+          sed -i '' -e "s/MACOSX_DEPLOYMENT_TARGET=[0-9]*\.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}/" build.py
+
+      - name: Build RustDesk
+        run: ./build.py --flutter --hwcodec --unix-file-copy-paste
+
+      - name: Create unsigned DMG
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" \
+          --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}-x86_64.dmg \
+          ./flutter/build/macos/Build/Products/Release/RustDesk.app
+
+      - name: Upload unsigned DMG
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-unsigned-macos-x86_64
+          path: rustdesk-${{ env.VERSION }}-x86_64.dmg
