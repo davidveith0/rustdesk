@@ -9,7 +9,7 @@ env:
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"  # 替换成你的 commit
   UPLOAD_ARTIFACT: "true"
   VERSION: "1.0.1"             # 替换成版本号
-  TAG_NAME: "v1.0.1"           # 替换成 tag
+  TAG_NAME: "1.0.1"           # 替换成 tag
 
 jobs:
   build-x86_64-macos:
