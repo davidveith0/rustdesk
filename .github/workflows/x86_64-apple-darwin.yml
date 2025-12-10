@@ -24,22 +24,24 @@ jobs:
       - name: Install build runtime
         run: |
           brew install llvm create-dmg nasm pkg-config
-          echo "Using NASM version: $(nasm -v)"
-          # Disable multipass optimization for AOM
-          export AOM_DISABLE_MULTIPASS=1
+          # Fix for AOM multipass NASM issue
+          export NASM_VER=$(nasm -v | head -n1)
+          echo "Using NASM version: $NASM_VER"
+          # Disable multipass optimization for AOM in vcpkg
+          find vcpkg/buildtrees/aom/src -name "CMakeLists.txt" -exec sed -i '' 's/ENABLE_MULTIPASS=ON/ENABLE_MULTIPASS=OFF/' {} \; || true
 
-      - name: Install flutter
+      - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: "stable"
+          channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
-      - name: Patch flutter
+      - name: Patch Flutter
         run: |
           cd $(dirname $(dirname $(which flutter)))
-          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+          [[ "3.24.5" == ${{ env.FLUTTER_VERSION }} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
 
-      - name: Workaround for flutter issue
+      - name: Workaround for Flutter issue
         shell: bash
         run: |
           cd "$(dirname "$(which flutter)")"
@@ -50,11 +52,7 @@ jobs:
         with:
           toolchain: ${{ env.MAC_RUST_VERSION }}
           targets: x86_64-apple-darwin
-          components: "rustfmt"
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: macos-x86_64
+          components: rustfmt
 
       - name: Restore bridge files
         uses: actions/download-artifact@v4
